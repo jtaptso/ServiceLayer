@@ -13,7 +13,7 @@ A modern replacement for SAP Business One's Data Transfer Workbench (DTW), built
 ```
 ┌──────────────────────────────────────────────────────┐
 │                  Web UI (Blazor WASM)                │
-│  Upload: Header file + Addresses file + Contacts file│
+│  Upload: single flat CSV/TXT/XLSX file               │
 │  Import mode, progress tracking, result report       │
 └──────────────────────┬───────────────────────────────┘
                        │ HTTP multipart/form-data
@@ -21,13 +21,13 @@ A modern replacement for SAP Business One's Data Transfer Workbench (DTW), built
 │               ASP.NET Core Web API                   │
 │                                                      │
 │  File Parser (CSV/TXT/XLSX)                          │
-│   ├─ BusinessPartners.csv  → List<ParsedRowDto>      │
-│   ├─ BPAddresses.csv       → List<ParsedRowDto>      │
-│   └─ ContactEmployees.csv  → List<ParsedRowDto>      │
+│   └─ BusinessPartners.csv  → List<ParsedRowDto>      │
+│        (each row = 1 BP + addresses + contacts       │
+│         as flat prefixed columns)                    │
 │                    │                                 │
-│             BPAssembler                              │
-│   (groups rows by CardCode → BusinessPartner entity) │
-│   (UDF columns U_* passed through automatically)     │
+│             BP Mapper                                │
+│   (ParsedRowDto → BusinessPartner domain entity)     │
+│   (U_* UDF columns passed through automatically)     │
 │                    │                                 │
 │             Validator (FluentValidation)              │
 │                    │                                 │
@@ -105,13 +105,9 @@ Interfaces/
   IServiceLayerClient.cs    ← Port for SL HTTP calls
   IFileParser.cs            ← Port for file parsing
   IImportJobRepository.cs   ← Port for job persistence
-  IBPAssembler.cs           ← Port for multi-file assembly
 DTOs/
-  ParsedRowDto.cs           ← One row from any file
-  BPImportFilesDto.cs       ← Groups the 3 parsed file results
+  ParsedRowDto.cs           ← One row from the flat file
   ImportJobDto.cs
-Assembly/
-  BPAssembler.cs            ← Groups rows by CardCode → BusinessPartner
 Validation/
   BusinessPartnerValidator.cs   ← FluentValidation rules
 ```
@@ -132,7 +128,8 @@ Parsing/
   TxtParser.cs              ← Delimiter-based TXT
   FileParserResolver.cs     ← Selects parser by file extension
 Mapping/
-  BusinessPartnerMapper.cs  ← ParsedRow → SL DTO (known fields + U_* UDFs)
+  BusinessPartnerMapper.cs  ← ParsedRowDto → BusinessPartner domain entity
+                              (flat columns → nested addresses/contacts/UDFs)
 ```
 
 ### `Shared` (referenced by both Api and Web)
@@ -159,12 +156,11 @@ appsettings.json            ← SL connection settings
 
 ```
 Pages/
-  Import.razor              ← 3-file upload (header + addresses + contacts) + mode selection
+  Import.razor              ← Single-file upload + mode selection
   Results.razor             ← Job progress + per-row results
 Services/
   ImportApiClient.cs        ← Typed HttpClient → Api
 Shared/
-  MultiFileUploadComponent.razor  ← Separate drop zones per template type
   ResultsTable.razor
 ```
 
@@ -197,17 +193,15 @@ Shared/
 
 ## Phase 1 Scope — Business Partners
 
-### Import Strategy — DTW-style Multi-File (Option B)
+### Import Strategy — Flat Wide File (Option A)
 
-Each import job accepts **up to 3 separate files**, each matching a specific template. Files are linked by `CardCode`. Only the header file is required.
+Each import job accepts **a single flat file**. One row = one Business Partner. Addresses and contacts are embedded as prefixed columns on the same row.
 
-| File (any name) | Template       | Linked by | Required |
-|-----------------|----------------|-----------|----------|
-| e.g. `BusinessPartners.csv` | `BPHeader`  | _(primary)_ | Yes |
-| e.g. `BPAddresses.csv`      | `BPAddress` | `CardCode`  | No  |
-| e.g. `ContactEmployees.csv` | `BPContact` | `CardCode`  | No  |
+| File (any name) | Format         | Required |
+|-----------------|----------------|----------|
+| e.g. `BusinessPartners.csv` | Flat wide CSV/TXT/XLSX | Yes |
 
-After parsing, the **BPAssembler** groups all rows by `CardCode` and builds complete `BusinessPartner` objects (with child collections) before import.
+The **mapper** reads each row and constructs a `BusinessPartner` domain object with nested `Addresses` and `Contacts` collections from the prefixed columns. No assembly step is needed.
 
 ### Supported Input Formats (per file)
 - `.csv` — comma or semicolon delimited
@@ -216,23 +210,19 @@ After parsing, the **BPAssembler** groups all rows by `CardCode` and builds comp
 
 ### User-Defined Fields (UDFs)
 
-UDF columns are supported on **all three files**. Any column prefixed with `U_` is automatically passed through to the Service Layer payload via `[JsonExtensionData]` on the SL DTOs — no code change required per UDF.
+UDF columns are supported on the flat file. Any column **not** prefixed with `BillTo_`, `ShipTo_`, or `Contact{n}_` and starting with `U_` is treated as a Business Partner-level UDF and passed through to the Service Layer payload via `[JsonExtensionData]` — no code change required per UDF.
 
-Example header file with UDFs:
+Example:
 ```
-CardCode, CardName, CardType, Phone1, U_TaxRegion, U_CustomerTier
-C001, Acme Corp, C, 555-0100, Northeast, Gold
-```
-
-Example address file with UDFs:
-```
-CardCode, AddressName, AddressType, Street, City, U_Region
-C001, Bill To, bo_BillTo, 123 Main St, New York, NY
+CardCode, CardName, CardType, U_TaxRegion, U_CustomerTier, BillTo_Street, Contact1_Name
+C001, Acme Corp, C, Northeast, Gold, 123 Main St, John Smith
 ```
 
 ### Business Partner Fields
 
-**Header file (`BPHeader`):**
+**Flat file column groups:**
+
+_Business Partner fields (required/optional):_
 
 | Column           | SL Property       | Required |
 |------------------|-------------------|----------|
@@ -248,33 +238,37 @@ C001, Bill To, bo_BillTo, 123 Main St, New York, NY
 | `FederalTaxID`   | `FederalTaxID`    | No       |
 | `U_*`            | _(UDF)_           | No — passed through automatically |
 
-**Address file (`BPAddress`):**
+_Bill-to address (prefix `BillTo_`):_
 
-| Column        | SL Property   | Notes                        |
-|---------------|---------------|------------------------------|
-| `CardCode`    | _(link key)_  | Must match a header row      |
-| `AddressName` | `AddressName` |                              |
-| `AddressType` | `AddressType` | `bo_BillTo` or `bo_ShipTo`  |
-| `Street`      | `Street`      |                              |
-| `City`        | `City`        |                              |
-| `ZipCode`     | `ZipCode`     |                              |
-| `Country`     | `Country`     | Two-letter ISO code          |
-| `State`       | `State`       |                              |
-| `U_*`         | _(UDF)_       | Passed through automatically |
+| Column              | SL Property   | Notes                       |
+|---------------------|---------------|-----------------------------|  
+| `BillTo_Street`     | `Street`      |                             |
+| `BillTo_City`       | `City`        |                             |
+| `BillTo_ZipCode`    | `ZipCode`     |                             |
+| `BillTo_Country`    | `Country`     | Two-letter ISO code         |
+| `BillTo_State`      | `State`       |                             |
 
-**Contact file (`BPContact`):**
+_Ship-to address (prefix `ShipTo_`):_
 
-| Column        | SL Property   | Notes                        |
-|---------------|---------------|------------------------------|
-| `CardCode`    | _(link key)_  | Must match a header row      |
-| `Name`        | `Name`        |                              |
-| `FirstName`   | `FirstName`   |                              |
-| `LastName`    | `LastName`    |                              |
-| `Phone1`      | `Phone1`      |                              |
-| `MobilePhone` | `MobilePhone` |                              |
-| `E_Mail`      | `E_Mail`      |                              |
-| `Position`    | `Position`    |                              |
-| `U_*`         | _(UDF)_       | Passed through automatically |
+| Column              | SL Property   | Notes                       |
+|---------------------|---------------|-----------------------------|  
+| `ShipTo_Street`     | `Street`      |                             |
+| `ShipTo_City`       | `City`        |                             |
+| `ShipTo_ZipCode`    | `ZipCode`     |                             |
+| `ShipTo_Country`    | `Country`     | Two-letter ISO code         |
+| `ShipTo_State`      | `State`       |                             |
+
+_Contact persons (prefix `Contact{n}_`, e.g. `Contact1_`, `Contact2_`):_
+
+| Column                  | SL Property   | Notes                   |
+|-------------------------|---------------|-------------------------|
+| `Contact{n}_Name`       | `Name`        |                         |
+| `Contact{n}_FirstName`  | `FirstName`   |                         |
+| `Contact{n}_LastName`   | `LastName`    |                         |
+| `Contact{n}_Phone1`     | `Phone1`      |                         |
+| `Contact{n}_MobilePhone`| `MobilePhone` |                         |
+| `Contact{n}_E_Mail`     | `E_Mail`      |                         |
+| `Contact{n}_Position`   | `Position`    |                         |
 
 ### Import Modes
 | Mode         | Behavior                                           |
@@ -302,15 +296,14 @@ C001, Bill To, bo_BillTo, 123 Main St, New York, NY
 | 2     | Domain entities, enums, value objects                                       | Planned |
 | 3     | Service Layer auth client (login, session cookie, keep-alive)               | Planned |
 | 4     | CSV / TXT / XLSX file parser                                                | Planned |
-| 5     | BPAssembler — group parsed rows by CardCode into `BusinessPartner` objects  | Planned |
-| 6     | BP Mapper (known fields + UDF passthrough) + FluentValidation rules         | Planned |
+| 5     | BP Mapper (flat row → domain entity with addresses + contacts + UDFs)       | Planned |
+| 6     | FluentValidation rules                                                      | Planned |
 | 7     | `ImportBusinessPartners` use case (MediatR command/handler)                 | Planned |
 | 8     | API controllers + Scalar docs                                               | Planned |
-| 9     | Blazor WASM: multi-file upload page + results page                          | Planned |
+| 9     | Blazor WASM: single-file upload page + results page                         | Planned |
 | 10    | Upsert mode (GET CardCode → PATCH if exists)                                | Planned |
 | 11    | Unit & integration tests                                                    | Planned |
 | 12    | Additional object types (Items, Sales Orders, etc.)                         | Planned |
-| 13    | Option A/C import modes selectable by user                                  | Planned |
 
 ---
 

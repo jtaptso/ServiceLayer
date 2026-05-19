@@ -110,61 +110,30 @@ Navigate to `/import` to upload a file.
 
 ## Import File Format
 
-Import uses a **DTW-style multi-file approach**: separate files per object type, linked by `CardCode`. Only the header file is required.
+Upload a **single flat CSV, TXT, or XLSX file**. One row = one Business Partner. Addresses and contacts are embedded as prefixed columns on the same row.
 
-| File | Template | Linked by | Required |
-|------|----------|-----------|----------|
-| e.g. `BusinessPartners.csv` | Header | _(primary key)_ | Yes |
-| e.g. `BPAddresses.csv`      | Addresses | `CardCode` | No |
-| e.g. `ContactEmployees.csv` | Contacts  | `CardCode` | No |
+| Format | Extension | Notes |
+|--------|-----------|-------|
+| CSV    | `.csv`    | Comma or semicolon delimited |
+| TXT    | `.txt`    | Tab or delimiter separated |
+| Excel  | `.xlsx`   | First sheet used |
 
-All files can be `.csv`, `.txt` (tab/delimiter separated), or `.xlsx`.
+### Column Groups
 
-### User-Defined Fields (UDFs)
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| _(none)_ | BP fields | `CardCode`, `CardName`, `CardType` |
+| `BillTo_` | Bill-to address | `BillTo_Street`, `BillTo_City`, `BillTo_Country` |
+| `ShipTo_` | Ship-to address | `ShipTo_Street`, `ShipTo_City`, `ShipTo_Country` |
+| `Contact{n}_` | Contact persons (1–9) | `Contact1_Name`, `Contact1_E_Mail` |
+| `U_` | UDFs — passed through automatically | `U_TaxRegion`, `U_CustomerTier` |
 
-UDF columns are supported on all three files. Any column prefixed with `U_` is automatically passed through to the Service Layer payload — no configuration needed.
+### Sample File
 
 ```csv
-CardCode, CardName, CardType, U_TaxRegion, U_CustomerTier
-C001, Acme Corp, C, Northeast, Gold
-```
-
-### Business Partner Header Columns
-
-| Column           | Required | Notes                          |
-|------------------|----------|--------------------------------|
-| `CardCode`       | Yes      | Max 15 characters. Links all files. |
-| `CardName`       | Yes      | Max 100 characters             |
-| `CardType`       | Yes      | `C` = Customer, `S` = Supplier, `L` = Lead |
-| `GroupCode`      | No       | Integer                        |
-| `Currency`       | No       | e.g. `USD`, `EUR`              |
-| `PayTermsGrpCode`| No       | Integer                        |
-| `Phone1`         | No       |                                |
-| `EmailAddress`   | No       | Must be valid email format     |
-| `Website`        | No       |                                |
-| `FederalTaxID`   | No       |                                |
-| `U_*`            | No       | Any UDF — passed through automatically |
-
-### Sample Files
-
-**`BusinessPartners.csv`**
-```csv
-CardCode,CardName,CardType,Phone1,EmailAddress,FederalTaxID,U_TaxRegion
-C001,Acme Corporation,C,+1-555-0100,info@acme.com,12-3456789,Northeast
-S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,98-7654321,West
-```
-
-**`BPAddresses.csv`**
-```csv
-CardCode,AddressName,AddressType,Street,City,ZipCode,Country
-C001,Bill To,bo_BillTo,123 Main St,New York,10001,US
-C001,Ship To,bo_ShipTo,456 Warehouse Ave,Brooklyn,11201,US
-```
-
-**`ContactEmployees.csv`**
-```csv
-CardCode,Name,FirstName,LastName,E_Mail,Position
-C001,John Smith,John,Smith,john@acme.com,Accounts Payable
+CardCode,CardName,CardType,Phone1,EmailAddress,U_TaxRegion,BillTo_Street,BillTo_City,BillTo_Country,ShipTo_Street,ShipTo_City,ShipTo_Country,Contact1_Name,Contact1_E_Mail
+C001,Acme Corporation,C,+1-555-0100,info@acme.com,Northeast,123 Main St,New York,US,456 Warehouse Ave,Brooklyn,US,John Smith,john@acme.com
+S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,West,789 Supply Rd,Los Angeles,US,,,,Jane Doe,jane@bigsupplier.com
 ```
 
 ---
@@ -183,18 +152,16 @@ C001,John Smith,John,Smith,john@acme.com,Accounts Payable
 
 | Method | Endpoint                                  | Description                        |
 |--------|-------------------------------------------|------------------------------------|
-| POST   | `/api/import/business-partners`           | Upload files and run import        |
+| POST   | `/api/import/business-partners`           | Upload file and run import         |
 | POST   | `/api/import/business-partners/export-log`| Download result log as CSV         |
 
 ### Import request (multipart/form-data)
 
-| Field           | Type    | Default   | Description                                  |
-|-----------------|---------|-----------|----------------------------------------------|
-| `fileHeader`    | file    | —         | Required. CSV, TXT, or XLSX header file       |
-| `fileAddresses` | file    | —         | Optional. CSV, TXT, or XLSX addresses file    |
-| `fileContacts`  | file    | —         | Optional. CSV, TXT, or XLSX contacts file     |
-| `mode`          | string  | `Upsert`  | `AddOnly`, `UpdateOnly`, `Upsert`            |
-| `stopOnError`   | boolean | `false`   | Stop at first error                          |
+| Field         | Type    | Default   | Description                          |
+|---------------|---------|-----------|--------------------------------------|
+| `file`        | file    | —         | Required. Flat CSV, TXT, or XLSX     |
+| `mode`        | string  | `Upsert`  | `AddOnly`, `UpdateOnly`, `Upsert`   |
+| `stopOnError` | boolean | `false`   | Stop at first error                  |
 {
   "totalRows":    3,
   "successCount": 2,
