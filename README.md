@@ -110,13 +110,30 @@ Navigate to `/import` to upload a file.
 
 ## Import File Format
 
-### Business Partner — Header
+Import uses a **DTW-style multi-file approach**: separate files per object type, linked by `CardCode`. Only the header file is required.
 
-The first row must contain column headers. Column names are case-insensitive.
+| File | Template | Linked by | Required |
+|------|----------|-----------|----------|
+| e.g. `BusinessPartners.csv` | Header | _(primary key)_ | Yes |
+| e.g. `BPAddresses.csv`      | Addresses | `CardCode` | No |
+| e.g. `ContactEmployees.csv` | Contacts  | `CardCode` | No |
+
+All files can be `.csv`, `.txt` (tab/delimiter separated), or `.xlsx`.
+
+### User-Defined Fields (UDFs)
+
+UDF columns are supported on all three files. Any column prefixed with `U_` is automatically passed through to the Service Layer payload — no configuration needed.
+
+```csv
+CardCode, CardName, CardType, U_TaxRegion, U_CustomerTier
+C001, Acme Corp, C, Northeast, Gold
+```
+
+### Business Partner Header Columns
 
 | Column           | Required | Notes                          |
 |------------------|----------|--------------------------------|
-| `CardCode`       | Yes      | Max 15 characters              |
+| `CardCode`       | Yes      | Max 15 characters. Links all files. |
 | `CardName`       | Yes      | Max 100 characters             |
 | `CardType`       | Yes      | `C` = Customer, `S` = Supplier, `L` = Lead |
 | `GroupCode`      | No       | Integer                        |
@@ -126,14 +143,28 @@ The first row must contain column headers. Column names are case-insensitive.
 | `EmailAddress`   | No       | Must be valid email format     |
 | `Website`        | No       |                                |
 | `FederalTaxID`   | No       |                                |
+| `U_*`            | No       | Any UDF — passed through automatically |
 
-### Sample CSV
+### Sample Files
 
+**`BusinessPartners.csv`**
 ```csv
-CardCode,CardName,CardType,Phone1,EmailAddress,FederalTaxID
-C001,Acme Corporation,C,+1-555-0100,info@acme.com,12-3456789
-S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,98-7654321
-C002,New Lead Co,L,,leads@newlead.com,
+CardCode,CardName,CardType,Phone1,EmailAddress,FederalTaxID,U_TaxRegion
+C001,Acme Corporation,C,+1-555-0100,info@acme.com,12-3456789,Northeast
+S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,98-7654321,West
+```
+
+**`BPAddresses.csv`**
+```csv
+CardCode,AddressName,AddressType,Street,City,ZipCode,Country
+C001,Bill To,bo_BillTo,123 Main St,New York,10001,US
+C001,Ship To,bo_ShipTo,456 Warehouse Ave,Brooklyn,11201,US
+```
+
+**`ContactEmployees.csv`**
+```csv
+CardCode,Name,FirstName,LastName,E_Mail,Position
+C001,John Smith,John,Smith,john@acme.com,Accounts Payable
 ```
 
 ---
@@ -152,20 +183,18 @@ C002,New Lead Co,L,,leads@newlead.com,
 
 | Method | Endpoint                                  | Description                        |
 |--------|-------------------------------------------|------------------------------------|
-| POST   | `/api/import/business-partners`           | Upload file and run import         |
+| POST   | `/api/import/business-partners`           | Upload files and run import        |
 | POST   | `/api/import/business-partners/export-log`| Download result log as CSV         |
 
 ### Import request (multipart/form-data)
 
-| Field         | Type    | Default   | Description                      |
-|---------------|---------|-----------|----------------------------------|
-| `file`        | file    | —         | CSV, TXT, or XLSX file           |
-| `mode`        | string  | `Upsert`  | `AddOnly`, `UpdateOnly`, `Upsert`|
-| `stopOnError` | boolean | `false`   | Stop at first error              |
-
-### Import response
-
-```json
+| Field           | Type    | Default   | Description                                  |
+|-----------------|---------|-----------|----------------------------------------------|
+| `fileHeader`    | file    | —         | Required. CSV, TXT, or XLSX header file       |
+| `fileAddresses` | file    | —         | Optional. CSV, TXT, or XLSX addresses file    |
+| `fileContacts`  | file    | —         | Optional. CSV, TXT, or XLSX contacts file     |
+| `mode`          | string  | `Upsert`  | `AddOnly`, `UpdateOnly`, `Upsert`            |
+| `stopOnError`   | boolean | `false`   | Stop at first error                          |
 {
   "totalRows":    3,
   "successCount": 2,

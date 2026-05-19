@@ -120,6 +120,7 @@ src/ServiceLayer.DTW.Domain/
 src/ServiceLayer.DTW.Application/
   UseCases/ImportBusinessPartners/
   Interfaces/
+  Assembly/
   DTOs/
   Validation/
 
@@ -320,6 +321,10 @@ public class SLBPAddress
     [JsonPropertyName("ZipCode")]     public string ZipCode     { get; set; } = string.Empty;
     [JsonPropertyName("Country")]     public string Country     { get; set; } = string.Empty;
     [JsonPropertyName("State")]       public string State       { get; set; } = string.Empty;
+
+    /// <summary>Captures any U_* UDF columns from the address file automatically.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
 }
 ```
 
@@ -338,6 +343,10 @@ public class SLContactEmployee
     [JsonPropertyName("MobilePhone")] public string MobilePhone { get; set; } = string.Empty;
     [JsonPropertyName("E_Mail")]      public string Email       { get; set; } = string.Empty;
     [JsonPropertyName("Position")]    public string Position    { get; set; } = string.Empty;
+
+    /// <summary>Captures any U_* UDF columns from the contacts file automatically.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
 }
 ```
 
@@ -365,6 +374,10 @@ public class SLBusinessPartner
 
     [JsonPropertyName("ContactEmployees")]
     public List<SLContactEmployee> ContactEmployees { get; set; } = [];
+
+    /// <summary>Captures any U_* UDF columns from the header file automatically.</summary>
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? AdditionalProperties { get; set; }
 }
 ```
 
@@ -515,6 +528,24 @@ public class ParsedRowDto
 }
 ```
 
+### Step 4.3a — Create BPImportFilesDto (groups the 3 parsed file results)
+
+**`src/ServiceLayer.DTW.Application/DTOs/BPImportFilesDto.cs`**
+```csharp
+namespace ServiceLayer.DTW.Application.DTOs;
+
+/// <summary>
+/// Holds the parsed rows from each of the 3 DTW-style template files.
+/// AddressRows and ContactRows are optional.
+/// </summary>
+public class BPImportFilesDto
+{
+    public List<ParsedRowDto> HeaderRows  { get; set; } = [];
+    public List<ParsedRowDto> AddressRows { get; set; } = [];
+    public List<ParsedRowDto> ContactRows { get; set; } = [];
+}
+```
+
 ### Step 4.3 — Implement the CSV parser
 
 **`src/ServiceLayer.DTW.Infrastructure/Parsing/CsvParser.cs`**
@@ -643,13 +674,155 @@ public class FileParserResolver
 
 ---
 
-## Phase 5 — Mapper and Validator
+## Phase 5 — BPAssembler, Mapper, and Validator
 
-### Step 5.1 — Implement the Business Partner mapper
+### Step 5.1 — Implement the BPAssembler (Application layer)
+
+The assembler takes the 3 parsed file results and groups them by `CardCode` into complete `BusinessPartner` domain objects with their child collections.
+
+**`src/ServiceLayer.DTW.Application/Assembly/BPAssembler.cs`**
+```csharp
+using ServiceLayer.DTW.Application.DTOs;
+using ServiceLayer.DTW.Domain.Enums;
+using ServiceLayer.DTW.Domain.Models;
+
+namespace ServiceLayer.DTW.Application.Assembly;
+
+public static class BPAssembler
+{
+    /// <summary>
+    /// Assembles BusinessPartner domain objects from 3 separately parsed files.
+    /// Returns one BusinessPartner per unique CardCode found in headerRows.
+    /// Address and contact rows are matched by CardCode and attached as child collections.
+    /// </summary>
+    public static List<BusinessPartner> Assemble(BPImportFilesDto files)
+    {
+        // Index address and contact rows by CardCode for fast lookup
+        var addressLookup = files.AddressRows
+            .GroupBy(r => r.Fields.GetValueOrDefault("CardCode", string.Empty),
+                     StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var contactLookup = files.ContactRows
+            .GroupBy(r => r.Fields.GetValueOrDefault("CardCode", string.Empty),
+                     StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.ToList(), StringComparer.OrdinalIgnoreCase);
+
+        var result = new List<BusinessPartner>();
+
+        foreach (var row in files.HeaderRows)
+        {
+            var f        = row.Fields;
+            var cardCode = f.GetValueOrDefault("CardCode", string.Empty);
+
+            var bp = new BusinessPartner
+            {
+                CardCode        = cardCode,
+                CardName        = f.GetValueOrDefault("CardName",        string.Empty),
+                CardType        = ParseCardType(f.GetValueOrDefault("CardType", "C")),
+                GroupCode       = ParseNullableInt(f.GetValueOrDefault("GroupCode")),
+                Currency        = NullIfEmpty(f.GetValueOrDefault("Currency")),
+                PayTermsGrpCode = ParseNullableInt(f.GetValueOrDefault("PayTermsGrpCode")),
+                Phone1          = NullIfEmpty(f.GetValueOrDefault("Phone1")),
+                EmailAddress    = NullIfEmpty(f.GetValueOrDefault("EmailAddress")),
+                Website         = NullIfEmpty(f.GetValueOrDefault("Website")),
+                FederalTaxID    = NullIfEmpty(f.GetValueOrDefault("FederalTaxID")),
+
+                // UDF columns (U_*) stored separately and passed to mapper
+                UdfFields = ExtractUdfs(f)
+            };
+
+            // Attach addresses for this CardCode
+            if (addressLookup.TryGetValue(cardCode, out var addrRows))
+                bp.Addresses = addrRows.Select(MapAddress).ToList();
+
+            // Attach contacts for this CardCode
+            if (contactLookup.TryGetValue(cardCode, out var contRows))
+                bp.Contacts = contRows.Select(MapContact).ToList();
+
+            result.Add(bp);
+        }
+
+        return result;
+    }
+
+    private static BPAddress MapAddress(ParsedRowDto row)
+    {
+        var f = row.Fields;
+        return new BPAddress
+        {
+            AddressName = f.GetValueOrDefault("AddressName", string.Empty),
+            AddressType = f.GetValueOrDefault("AddressType", string.Empty),
+            Street      = f.GetValueOrDefault("Street",      string.Empty),
+            City        = f.GetValueOrDefault("City",        string.Empty),
+            ZipCode     = f.GetValueOrDefault("ZipCode",     string.Empty),
+            Country     = f.GetValueOrDefault("Country",     string.Empty),
+            State       = f.GetValueOrDefault("State",       string.Empty),
+            UdfFields   = ExtractUdfs(f)
+        };
+    }
+
+    private static ContactPerson MapContact(ParsedRowDto row)
+    {
+        var f = row.Fields;
+        return new ContactPerson
+        {
+            Name        = f.GetValueOrDefault("Name",        string.Empty),
+            FirstName   = f.GetValueOrDefault("FirstName",   string.Empty),
+            LastName    = f.GetValueOrDefault("LastName",    string.Empty),
+            Phone1      = f.GetValueOrDefault("Phone1",      string.Empty),
+            MobilePhone = f.GetValueOrDefault("MobilePhone", string.Empty),
+            Email       = f.GetValueOrDefault("E_Mail",      string.Empty),
+            Position    = f.GetValueOrDefault("Position",    string.Empty),
+            UdfFields   = ExtractUdfs(f)
+        };
+    }
+
+    /// <summary>
+    /// Extracts all U_* columns from a row's fields dictionary.
+    /// These are passed to the SL mapper and serialized via [JsonExtensionData].
+    /// </summary>
+    private static Dictionary<string, string> ExtractUdfs(Dictionary<string, string> fields) =>
+        fields
+            .Where(kvp => kvp.Key.StartsWith("U_", StringComparison.OrdinalIgnoreCase))
+            .ToDictionary(kvp => kvp.Key, kvp => kvp.Value, StringComparer.OrdinalIgnoreCase);
+
+    private static CardType ParseCardType(string value) => value.ToUpperInvariant() switch
+    {
+        "C" or "CUSTOMER" => CardType.Customer,
+        "S" or "SUPPLIER" => CardType.Supplier,
+        "L" or "LEAD"     => CardType.Lead,
+        _                  => CardType.Customer
+    };
+
+    private static int?    ParseNullableInt(string? v) => int.TryParse(v, out var r) ? r : null;
+    private static string? NullIfEmpty(string? v)      => string.IsNullOrWhiteSpace(v) ? null : v;
+}
+```
+
+> **Note:** `UdfFields` must be added to the domain models (`BusinessPartner`, `BPAddress`, `ContactPerson`). Update Step 2.2 accordingly.
+
+### Step 5.1a — Add UdfFields to domain models
+
+Add the following property to each of the three domain models:
+
+```csharp
+/// <summary>User-defined field values (U_* columns). Passed through to Service Layer.</summary>
+public Dictionary<string, string> UdfFields { get; set; } = [];
+```
+
+Add it to:
+- `src/ServiceLayer.DTW.Domain/Models/BusinessPartner.cs`
+- `src/ServiceLayer.DTW.Domain/Models/BPAddress.cs`
+- `src/ServiceLayer.DTW.Domain/Models/ContactPerson.cs`
+
+### Step 5.2 — Implement the Business Partner mapper (with UDF passthrough)
+
+The mapper converts domain objects to SL DTOs. Known fields map to explicit properties; `UdfFields` are written into `AdditionalProperties` which is serialized by `[JsonExtensionData]`.
 
 **`src/ServiceLayer.DTW.Infrastructure/Mapping/BusinessPartnerMapper.cs`**
 ```csharp
-using ServiceLayer.DTW.Application.DTOs;
+using System.Text.Json;
 using ServiceLayer.DTW.Domain.Enums;
 using ServiceLayer.DTW.Domain.Models;
 using ServiceLayer.DTW.Infrastructure.ServiceLayer.DTOs;
@@ -658,27 +831,11 @@ namespace ServiceLayer.DTW.Infrastructure.Mapping;
 
 public static class BusinessPartnerMapper
 {
-    // Map ParsedRowDto (from file) → Domain BusinessPartner
-    public static BusinessPartner ToDomain(ParsedRowDto row)
-    {
-        var f = row.Fields;
-
-        return new BusinessPartner
-        {
-            CardCode        = f.GetValueOrDefault("CardCode",        string.Empty),
-            CardName        = f.GetValueOrDefault("CardName",        string.Empty),
-            CardType        = ParseCardType(f.GetValueOrDefault("CardType", "C")),
-            GroupCode       = ParseNullableInt(f.GetValueOrDefault("GroupCode")),
-            Currency        = f.GetValueOrDefault("Currency"),
-            PayTermsGrpCode = ParseNullableInt(f.GetValueOrDefault("PayTermsGrpCode")),
-            Phone1          = f.GetValueOrDefault("Phone1"),
-            EmailAddress    = f.GetValueOrDefault("EmailAddress"),
-            Website         = f.GetValueOrDefault("Website"),
-            FederalTaxID    = f.GetValueOrDefault("FederalTaxID")
-        };
-    }
-
-    // Map Domain BusinessPartner → SL DTO (for HTTP requests)
+    /// <summary>
+    /// Maps a domain BusinessPartner (assembled from header + address + contact files)
+    /// to the SL DTO that will be serialized and POSTed/PATCHed to Service Layer.
+    /// UDF fields (U_*) are passed through via [JsonExtensionData].
+    /// </summary>
     public static SLBusinessPartner ToSLDto(BusinessPartner bp) => new()
     {
         CardCode        = bp.CardCode,
@@ -692,36 +849,46 @@ public static class BusinessPartnerMapper
         Website         = bp.Website,
         FederalTaxID    = bp.FederalTaxID,
 
+        // UDFs from the header file
+        AdditionalProperties = ToJsonElementDict(bp.UdfFields),
+
         BPAddresses = bp.Addresses.Select(a => new SLBPAddress
         {
-            AddressName = a.AddressName,
-            AddressType = a.AddressType,
-            Street      = a.Street,
-            City        = a.City,
-            ZipCode     = a.ZipCode,
-            Country     = a.Country,
-            State       = a.State
+            AddressName          = a.AddressName,
+            AddressType          = a.AddressType,
+            Street               = a.Street,
+            City                 = a.City,
+            ZipCode              = a.ZipCode,
+            Country              = a.Country,
+            State                = a.State,
+            AdditionalProperties = ToJsonElementDict(a.UdfFields)  // UDFs from address file
         }).ToList(),
 
         ContactEmployees = bp.Contacts.Select(c => new SLContactEmployee
         {
-            Name        = c.Name,
-            FirstName   = c.FirstName,
-            LastName    = c.LastName,
-            Phone1      = c.Phone1,
-            MobilePhone = c.MobilePhone,
-            Email       = c.Email,
-            Position    = c.Position
+            Name                 = c.Name,
+            FirstName            = c.FirstName,
+            LastName             = c.LastName,
+            Phone1               = c.Phone1,
+            MobilePhone          = c.MobilePhone,
+            Email                = c.Email,
+            Position             = c.Position,
+            AdditionalProperties = ToJsonElementDict(c.UdfFields)  // UDFs from contacts file
         }).ToList()
     };
 
-    private static CardType ParseCardType(string value) => value.ToUpperInvariant() switch
+    /// <summary>
+    /// Converts string UDF values to JsonElement so they can be serialized
+    /// by System.Text.Json via [JsonExtensionData].
+    /// </summary>
+    private static Dictionary<string, JsonElement>? ToJsonElementDict(Dictionary<string, string> udfs)
     {
-        "C" or "CUSTOMER" => CardType.Customer,
-        "S" or "SUPPLIER" => CardType.Supplier,
-        "L" or "LEAD"     => CardType.Lead,
-        _                  => CardType.Customer
-    };
+        if (udfs.Count == 0) return null;
+
+        return udfs.ToDictionary(
+            kvp => kvp.Key,
+            kvp => JsonSerializer.SerializeToElement(kvp.Value));
+    }
 
     private static string CardTypeToSLString(CardType ct) => ct switch
     {
@@ -730,9 +897,6 @@ public static class BusinessPartnerMapper
         CardType.Lead     => "cLead",
         _                  => "cCustomer"
     };
-
-    private static int? ParseNullableInt(string? value) =>
-        int.TryParse(value, out var result) ? result : null;
 }
 ```
 
@@ -777,6 +941,8 @@ public class BusinessPartnerValidator : AbstractValidator<BusinessPartner>
 
 ### Step 6.1 — Create the command and result
 
+The command now accepts **3 optional streams** — one per template file. Only the header stream is required.
+
 **`src/ServiceLayer.DTW.Application/UseCases/ImportBusinessPartners/ImportBusinessPartnersCommand.cs`**
 ```csharp
 using MediatR;
@@ -785,10 +951,14 @@ using ServiceLayer.DTW.Domain.Enums;
 namespace ServiceLayer.DTW.Application.UseCases.ImportBusinessPartners;
 
 public record ImportBusinessPartnersCommand(
-    Stream   FileStream,
-    string   FileName,
+    Stream     HeaderStream,
+    string     HeaderFileName,
+    Stream?    AddressStream,
+    string?    AddressFileName,
+    Stream?    ContactStream,
+    string?    ContactFileName,
     ImportMode Mode,
-    bool     StopOnError
+    bool       StopOnError
 ) : IRequest<ImportBusinessPartnersResult>;
 ```
 
@@ -818,33 +988,37 @@ public class ImportRowResult
 
 ### Step 6.2 — Implement the MediatR handler
 
+The handler now:
+1. Parses all 3 streams independently
+2. Passes the results to `BPAssembler` to get assembled `BusinessPartner` objects
+3. Validates and imports each assembled BP
+
 **`src/ServiceLayer.DTW.Application/UseCases/ImportBusinessPartners/ImportBusinessPartnersHandler.cs`**
 ```csharp
 using FluentValidation;
 using MediatR;
+using ServiceLayer.DTW.Application.Assembly;
+using ServiceLayer.DTW.Application.DTOs;
 using ServiceLayer.DTW.Application.Interfaces;
 using ServiceLayer.DTW.Domain.Enums;
-using ServiceLayer.DTW.Domain.Interfaces;
 
 namespace ServiceLayer.DTW.Application.UseCases.ImportBusinessPartners;
 
 public class ImportBusinessPartnersHandler
     : IRequestHandler<ImportBusinessPartnersCommand, ImportBusinessPartnersResult>
 {
-    private readonly IFileParser           _parser;        // resolved externally per file type
-    private readonly IServiceLayerClient   _slClient;
-    private readonly IValidator<Domain.Models.BusinessPartner> _validator;
+    private readonly FileParserResolver                            _parserResolver;
+    private readonly IServiceLayerClient                           _slClient;
+    private readonly IValidator<Domain.Models.BusinessPartner>     _validator;
 
-    // NOTE: In Phase 7, the parser will be resolved by a resolver.
-    // For now, inject IFileParser directly (or use the resolver).
     public ImportBusinessPartnersHandler(
-        IFileParser                                     parser,
+        FileParserResolver                              parserResolver,
         IServiceLayerClient                             slClient,
         IValidator<Domain.Models.BusinessPartner>       validator)
     {
-        _parser    = parser;
-        _slClient  = slClient;
-        _validator = validator;
+        _parserResolver = parserResolver;
+        _slClient       = slClient;
+        _validator      = validator;
     }
 
     public async Task<ImportBusinessPartnersResult> Handle(
@@ -853,26 +1027,44 @@ public class ImportBusinessPartnersHandler
     {
         var result = new ImportBusinessPartnersResult();
 
-        // 1. Parse file
-        var rows = await _parser.ParseAsync(command.FileStream, command.FileName, ct);
-        result.TotalRows = rows.Count;
+        // 1. Parse each file using the appropriate parser (CSV/TXT/XLSX)
+        var files = new BPImportFilesDto
+        {
+            HeaderRows = await _parserResolver
+                .Resolve(command.HeaderFileName)
+                .ParseAsync(command.HeaderStream, command.HeaderFileName, ct),
 
-        // 2. Login to Service Layer
+            AddressRows = command.AddressStream is not null
+                ? await _parserResolver
+                    .Resolve(command.AddressFileName!)
+                    .ParseAsync(command.AddressStream, command.AddressFileName!, ct)
+                : [],
+
+            ContactRows = command.ContactStream is not null
+                ? await _parserResolver
+                    .Resolve(command.ContactFileName!)
+                    .ParseAsync(command.ContactStream, command.ContactFileName!, ct)
+                : []
+        };
+
+        // 2. Assemble: group rows by CardCode into BusinessPartner objects
+        var businessPartners = BPAssembler.Assemble(files);
+        result.TotalRows = businessPartners.Count;
+
+        // 3. Login to Service Layer
         await _slClient.LoginAsync(ct);
 
         try
         {
-            foreach (var row in rows)
+            int rowNum = 1;
+            foreach (var bp in businessPartners)
             {
-                var rowResult = new ImportRowResult { RowNumber = row.RowNumber };
+                var rowResult = new ImportRowResult
+                {
+                    RowNumber = rowNum++,
+                    CardCode  = bp.CardCode
+                };
                 result.RowResults.Add(rowResult);
-
-                // 3. Map to domain entity
-                // Mapping happens in Infrastructure; use interface here
-                // (BusinessPartnerMapper is called by a domain service or adapter)
-                // For simplicity in this phase, we import a mapped object
-                var bp = MapRow(row);
-                rowResult.CardCode = bp.CardCode;
 
                 // 4. Validate
                 var validation = await _validator.ValidateAsync(bp, ct);
@@ -933,20 +1125,6 @@ public class ImportBusinessPartnersHandler
 
         return result;
     }
-
-    // Temporary inline mapping — will be replaced by injected mapper in Phase 7
-    private static Domain.Models.BusinessPartner MapRow(Application.DTOs.ParsedRowDto row)
-    {
-        var f = row.Fields;
-        return new Domain.Models.BusinessPartner
-        {
-            CardCode     = f.GetValueOrDefault("CardCode",  string.Empty),
-            CardName     = f.GetValueOrDefault("CardName",  string.Empty),
-            EmailAddress = f.GetValueOrDefault("EmailAddress"),
-            Phone1       = f.GetValueOrDefault("Phone1"),
-            FederalTaxID = f.GetValueOrDefault("FederalTaxID")
-        };
-    }
 }
 ```
 
@@ -1000,6 +1178,8 @@ public class ImportJobResponse
 
 ### Step 7.2 — Create the Import API controller
 
+The controller accepts **3 multipart files**: header (required), addresses (optional), contacts (optional).
+
 **`src/ServiceLayer.DTW.Api/Controllers/ImportController.cs`**
 ```csharp
 using MediatR;
@@ -1019,23 +1199,39 @@ public class ImportController : ControllerBase
     public ImportController(IMediator mediator) => _mediator = mediator;
 
     /// <summary>
-    /// Upload a CSV/TXT/XLSX file to import Business Partners.
+    /// Upload DTW-style template files to import Business Partners.
+    /// file_header is required. file_addresses and file_contacts are optional.
+    /// Each file can be CSV, TXT, or XLSX.
+    /// UDF columns (U_*) in any file are automatically passed to Service Layer.
     /// </summary>
     [HttpPost("business-partners")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<ImportJobResponse>> ImportBusinessPartners(
-        IFormFile  file,
-        [FromForm] ImportMode mode        = ImportMode.Upsert,
-        [FromForm] bool       stopOnError = false,
-        CancellationToken     ct          = default)
+        IFormFile            fileHeader,
+        IFormFile?           fileAddresses = null,
+        IFormFile?           fileContacts  = null,
+        [FromForm] ImportMode mode         = ImportMode.Upsert,
+        [FromForm] bool       stopOnError  = false,
+        CancellationToken     ct           = default)
     {
-        if (file is null || file.Length == 0)
-            return BadRequest("No file provided.");
+        if (fileHeader is null || fileHeader.Length == 0)
+            return BadRequest("Header file is required.");
 
-        await using var stream = file.OpenReadStream();
+        await using var headerStream  = fileHeader.OpenReadStream();
+        await using var addressStream = fileAddresses?.OpenReadStream();
+        await using var contactStream = fileContacts?.OpenReadStream();
 
-        var command = new ImportBusinessPartnersCommand(stream, file.FileName, mode, stopOnError);
-        var result  = await _mediator.Send(command, ct);
+        var command = new ImportBusinessPartnersCommand(
+            HeaderStream:    headerStream,
+            HeaderFileName:  fileHeader.FileName,
+            AddressStream:   addressStream,
+            AddressFileName: fileAddresses?.FileName,
+            ContactStream:   contactStream,
+            ContactFileName: fileContacts?.FileName,
+            Mode:            mode,
+            StopOnError:     stopOnError);
+
+        var result = await _mediator.Send(command, ct);
 
         var response = new ImportJobResponse
         {
@@ -1149,14 +1345,29 @@ public class ImportApiClient
 
     public ImportApiClient(HttpClient http) => _http = http;
 
+    /// <summary>
+    /// Sends up to 3 template files to the API.
+    /// addressStream and contactStream are optional.
+    /// </summary>
     public async Task<ImportJobResponse?> ImportBusinessPartnersAsync(
-        Stream     fileStream,
-        string     fileName,
+        Stream     headerStream,
+        string     headerFileName,
+        Stream?    addressStream,
+        string?    addressFileName,
+        Stream?    contactStream,
+        string?    contactFileName,
         ImportMode mode,
         bool       stopOnError)
     {
         using var content = new MultipartFormDataContent();
-        content.Add(new StreamContent(fileStream), "file", fileName);
+        content.Add(new StreamContent(headerStream), "fileHeader", headerFileName);
+
+        if (addressStream is not null && addressFileName is not null)
+            content.Add(new StreamContent(addressStream), "fileAddresses", addressFileName);
+
+        if (contactStream is not null && contactFileName is not null)
+            content.Add(new StreamContent(contactStream), "fileContacts", contactFileName);
+
         content.Add(new StringContent(mode.ToString()),        "mode");
         content.Add(new StringContent(stopOnError.ToString()), "stopOnError");
 
@@ -1192,6 +1403,8 @@ await builder.Build().RunAsync();
 
 ### Step 8.3 — Create the Import page
 
+The UI provides **three separate file pickers** — one per template type. Only the header file is required.
+
 **`src/ServiceLayer.DTW.Web/Pages/Import.razor`**
 ```razor
 @page "/import"
@@ -1202,13 +1415,26 @@ await builder.Build().RunAsync();
 
 <h2>Import Business Partners</h2>
 
-<div>
-    <label>File (CSV / TXT / XLSX):</label>
-    <InputFile OnChange="OnFileSelected" accept=".csv,.txt,.xlsx" />
-</div>
+<table>
+    <tr>
+        <td><strong>Header file</strong> (required)</td>
+        <td><InputFile OnChange="e => _fileHeader = e.File" accept=".csv,.txt,.xlsx" /></td>
+        <td><small>BusinessPartners.csv — CardCode, CardName, CardType, Phone1, U_*</small></td>
+    </tr>
+    <tr>
+        <td>Addresses file (optional)</td>
+        <td><InputFile OnChange="e => _fileAddresses = e.File" accept=".csv,.txt,.xlsx" /></td>
+        <td><small>BPAddresses.csv — CardCode, AddressType, Street, City, U_*</small></td>
+    </tr>
+    <tr>
+        <td>Contacts file (optional)</td>
+        <td><InputFile OnChange="e => _fileContacts = e.File" accept=".csv,.txt,.xlsx" /></td>
+        <td><small>ContactEmployees.csv — CardCode, Name, FirstName, E_Mail, U_*</small></td>
+    </tr>
+</table>
 
-<div>
-    <label>Import Mode:</label>
+<div style="margin-top:1rem">
+    <label>Import Mode: </label>
     <select @bind="_mode">
         <option value="@ImportMode.Upsert">Upsert (Add or Update)</option>
         <option value="@ImportMode.AddOnly">Add Only</option>
@@ -1223,7 +1449,7 @@ await builder.Build().RunAsync();
     </label>
 </div>
 
-<button @onclick="RunImport" disabled="@(_file is null || _importing)">
+<button @onclick="RunImport" disabled="@(_fileHeader is null || _importing)" style="margin-top:1rem">
     @(_importing ? "Importing..." : "Start Import")
 </button>
 
@@ -1231,13 +1457,16 @@ await builder.Build().RunAsync();
 {
     <hr />
     <h3>Results</h3>
-    <p>Total: @_result.TotalRows | Success: @_result.SuccessCount | Errors: @_result.ErrorCount | Skipped: @_result.SkippedCount</p>
+    <p>
+        Total: @_result.TotalRows |
+        Success: @_result.SuccessCount |
+        Errors: @_result.ErrorCount |
+        Skipped: @_result.SkippedCount
+    </p>
 
     <table>
         <thead>
-            <tr>
-                <th>Row</th><th>CardCode</th><th>Status</th><th>Message</th>
-            </tr>
+            <tr><th>Row</th><th>CardCode</th><th>Status</th><th>Message</th></tr>
         </thead>
         <tbody>
             @foreach (var row in _result.RowResults)
@@ -1259,28 +1488,35 @@ await builder.Build().RunAsync();
 }
 
 @code {
-    private IBrowserFile? _file;
+    private IBrowserFile? _fileHeader;
+    private IBrowserFile? _fileAddresses;
+    private IBrowserFile? _fileContacts;
     private ImportMode    _mode        = ImportMode.Upsert;
     private bool          _stopOnError = false;
     private bool          _importing   = false;
     private ImportJobResponse? _result;
     private string?       _error;
 
-    private void OnFileSelected(InputFileChangeEventArgs e)
-        => _file = e.File;
+    private const long MaxFileSize = 10 * 1024 * 1024; // 10 MB
 
     private async Task RunImport()
     {
-        if (_file is null) return;
+        if (_fileHeader is null) return;
         _importing = true;
         _result    = null;
         _error     = null;
 
         try
         {
-            await using var stream = _file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
+            await using var headerStream  = _fileHeader.OpenReadStream(MaxFileSize);
+            await using var addressStream = _fileAddresses?.OpenReadStream(MaxFileSize);
+            await using var contactStream = _fileContacts?.OpenReadStream(MaxFileSize);
+
             _result = await ApiClient.ImportBusinessPartnersAsync(
-                stream, _file.Name, _mode, _stopOnError);
+                headerStream,  _fileHeader.Name,
+                addressStream, _fileAddresses?.Name,
+                contactStream, _fileContacts?.Name,
+                _mode, _stopOnError);
         }
         catch (Exception ex)
         {
@@ -1406,17 +1642,21 @@ public class CsvParserTests
 
 ### Step 10.3 — Unit test the handler (with mocks)
 
+The handler now uses `FileParserResolver` and `BPAssembler`. Mock the resolver to return a mock parser.
+
 **`tests/ServiceLayer.DTW.Application.Tests/ImportBusinessPartnersHandlerTests.cs`**
 ```csharp
 using System.Text;
 using FluentValidation;
 using FluentValidation.Results;
 using Moq;
-using ServiceLayer.DTW.Application.Interfaces;
+using ServiceLayer.DTW.Application.Assembly;
 using ServiceLayer.DTW.Application.DTOs;
+using ServiceLayer.DTW.Application.Interfaces;
 using ServiceLayer.DTW.Application.UseCases.ImportBusinessPartners;
 using ServiceLayer.DTW.Domain.Enums;
 using ServiceLayer.DTW.Domain.Models;
+using ServiceLayer.DTW.Infrastructure.Parsing;
 
 namespace ServiceLayer.DTW.Application.Tests;
 
@@ -1430,29 +1670,63 @@ public class ImportBusinessPartnersHandlerTests
         var validatorMock = new Mock<IValidator<BusinessPartner>>();
 
         parserMock.Setup(p => p.Supports(It.IsAny<string>())).Returns(true);
-        parserMock.Setup(p => p.ParseAsync(It.IsAny<Stream>(), It.IsAny<string>(), default))
+        parserMock
+            .Setup(p => p.ParseAsync(It.IsAny<Stream>(), It.IsAny<string>(), default))
             .ReturnsAsync(new List<ParsedRowDto>
             {
-                new() { RowNumber = 1, Fields = new() {
-                    { "CardCode", "C001" }, { "CardName", "Acme" }
+                new() { RowNumber = 1, Fields = new(StringComparer.OrdinalIgnoreCase) {
+                    { "CardCode", "C001" }, { "CardName", "Acme" }, { "CardType", "C" }
                 }}
             });
 
-        validatorMock.Setup(v => v.ValidateAsync(It.IsAny<BusinessPartner>(), default))
+        validatorMock
+            .Setup(v => v.ValidateAsync(It.IsAny<BusinessPartner>(), default))
             .ReturnsAsync(new ValidationResult());
 
-        slClientMock.Setup(s => s.BusinessPartnerExistsAsync("C001", default)).ReturnsAsync(false);
+        slClientMock
+            .Setup(s => s.BusinessPartnerExistsAsync("C001", default))
+            .ReturnsAsync(false);
+
+        // Resolver returns the mock parser for any file name
+        var resolver = new FileParserResolver(new[] { parserMock.Object });
 
         var handler = new ImportBusinessPartnersHandler(
-            parserMock.Object, slClientMock.Object, validatorMock.Object);
+            resolver, slClientMock.Object, validatorMock.Object);
 
         var command = new ImportBusinessPartnersCommand(
-            new MemoryStream(), "test.csv", ImportMode.Upsert, false);
+            HeaderStream:    new MemoryStream(),
+            HeaderFileName:  "test.csv",
+            AddressStream:   null,
+            AddressFileName: null,
+            ContactStream:   null,
+            ContactFileName: null,
+            Mode:            ImportMode.Upsert,
+            StopOnError:     false);
 
         var result = await handler.Handle(command, default);
 
         Assert.Equal(1, result.SuccessCount);
         Assert.Equal(0, result.ErrorCount);
+    }
+
+    [Fact]
+    public async Task Should_Extract_Udf_Fields_From_Header_Row()
+    {
+        // Verifies that U_* columns are captured by the assembler
+        var rows = new List<ParsedRowDto>
+        {
+            new() { RowNumber = 1, Fields = new(StringComparer.OrdinalIgnoreCase) {
+                { "CardCode", "C001" }, { "CardName", "Acme" }, { "CardType", "C" },
+                { "U_TaxRegion", "Northeast" }, { "U_CustomerTier", "Gold" }
+            }}
+        };
+
+        var files  = new BPImportFilesDto { HeaderRows = rows };
+        var result = BPAssembler.Assemble(files);
+
+        Assert.Single(result);
+        Assert.Equal("Northeast", result[0].UdfFields["U_TaxRegion"]);
+        Assert.Equal("Gold",      result[0].UdfFields["U_CustomerTier"]);
     }
 }
 ```
@@ -1483,49 +1757,80 @@ dotnet run --project src/ServiceLayer.DTW.Web
 
 Navigate to `https://localhost:7001/import`.
 
-### Step 11.3 — Sample BP import file (CSV)
+### Step 11.3 — Sample import files
 
-Create a `sample-bp.csv` file:
+**`sample-BusinessPartners.csv`** (header file — required)
 ```
-CardCode,CardName,CardType,Phone1,EmailAddress,FederalTaxID
-C001,Acme Corporation,C,+1-555-0100,info@acme.com,12-3456789
-S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,98-7654321
-C002,New Lead Co,L,,leads@newlead.com,
+CardCode,CardName,CardType,Phone1,EmailAddress,FederalTaxID,U_TaxRegion,U_CustomerTier
+C001,Acme Corporation,C,+1-555-0100,info@acme.com,12-3456789,Northeast,Gold
+S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,98-7654321,West,Standard
+C002,New Lead Co,L,,leads@newlead.com,,,
 ```
 
-Upload this file via the Scalar UI (`/scalar/v1`) or the Blazor UI to verify end-to-end import.
+**`sample-BPAddresses.csv`** (address file — optional, linked by CardCode)
+```
+CardCode,AddressName,AddressType,Street,City,ZipCode,Country,U_Region
+C001,Bill To,bo_BillTo,123 Main St,New York,10001,US,NY
+C001,Ship To,bo_ShipTo,456 Warehouse Ave,Brooklyn,11201,US,NY
+S001,Bill To,bo_BillTo,789 Supply Rd,Los Angeles,90001,US,CA
+```
+
+**`sample-ContactEmployees.csv`** (contacts file — optional, linked by CardCode)
+```
+CardCode,Name,FirstName,LastName,Phone1,MobilePhone,E_Mail,Position
+C001,John Smith,John,Smith,+1-555-0101,+1-555-9901,john@acme.com,Accounts Payable
+S001,Jane Doe,Jane,Doe,+1-555-0201,,jane@bigsupplier.com,Sales Rep
+```
+
+Upload these 3 files via the Scalar UI (`/scalar/v1`) or the Blazor UI to verify end-to-end import.
 
 ---
 
 ## Reference — Template Column Names
 
-### Business Partner Header Template
+### Business Partner Header Template (`BusinessPartners.csv`)
 
-| Column Name      | Required | Notes                                |
-|------------------|----------|--------------------------------------|
-| `CardCode`       | Yes      | Max 15 chars                         |
-| `CardName`       | Yes      | Max 100 chars                        |
-| `CardType`       | Yes      | `C` / `S` / `L`                     |
-| `GroupCode`      | No       | Integer                              |
-| `Currency`       | No       | e.g., `USD`, `EUR`                   |
-| `PayTermsGrpCode`| No       | Integer                              |
-| `Phone1`         | No       |                                      |
-| `EmailAddress`   | No       | Validated format                     |
-| `Website`        | No       |                                      |
-| `FederalTaxID`   | No       |                                      |
+| Column Name      | Required | Notes                                              |
+|------------------|----------|----------------------------------------------------|  
+| `CardCode`       | Yes      | Max 15 chars. Primary key linking all 3 files.     |
+| `CardName`       | Yes      | Max 100 chars                                      |
+| `CardType`       | Yes      | `C` = Customer, `S` = Supplier, `L` = Lead         |
+| `GroupCode`      | No       | Integer                                            |
+| `Currency`       | No       | e.g., `USD`, `EUR`                                 |
+| `PayTermsGrpCode`| No       | Integer                                            |
+| `Phone1`         | No       |                                                    |
+| `EmailAddress`   | No       | Validated email format                             |
+| `Website`        | No       |                                                    |
+| `FederalTaxID`   | No       |                                                    |
+| `U_*`            | No       | Any UDF column — passed through automatically      |
 
-### Address Template (per row, linked by CardCode)
+### Address Template (`BPAddresses.csv`)
 
-| Column Name   | Notes                         |
-|---------------|-------------------------------|
-| `CardCode`    | Links to BP header            |
-| `AddressName` | e.g., `Bill To`, `Ship To`   |
-| `AddressType` | `bo_BillTo` or `bo_ShipTo`  |
-| `Street`      |                               |
-| `City`        |                               |
-| `ZipCode`     |                               |
-| `Country`     | Two-letter ISO code           |
-| `State`       |                               |
+| Column Name   | Required | Notes                                              |
+|---------------|----------|----------------------------------------------------|  
+| `CardCode`    | Yes      | Must match a row in the header file                |
+| `AddressName` | Yes      | e.g., `Bill To`, `Main Warehouse`                  |
+| `AddressType` | Yes      | `bo_BillTo` or `bo_ShipTo`                        |
+| `Street`      | No       |                                                    |
+| `City`        | No       |                                                    |
+| `ZipCode`     | No       |                                                    |
+| `Country`     | No       | Two-letter ISO code (e.g., `US`, `DE`)             |
+| `State`       | No       |                                                    |
+| `U_*`         | No       | Any UDF column — passed through automatically      |
+
+### Contacts Template (`ContactEmployees.csv`)
+
+| Column Name   | Required | Notes                                              |
+|---------------|----------|----------------------------------------------------|  
+| `CardCode`    | Yes      | Must match a row in the header file                |
+| `Name`        | Yes      | Full display name                                  |
+| `FirstName`   | No       |                                                    |
+| `LastName`    | No       |                                                    |
+| `Phone1`      | No       |                                                    |
+| `MobilePhone` | No       |                                                    |
+| `E_Mail`      | No       |                                                    |
+| `Position`    | No       |                                                    |
+| `U_*`         | No       | Any UDF column — passed through automatically      |
 
 ---
 
@@ -1536,5 +1841,7 @@ Upload this file via the Scalar UI (`/scalar/v1`) or the Blazor UI to verify end
 | SSL error connecting to SL | Self-signed cert on SAP server | Use `DangerousAcceptAnyServerCertificateValidator` in dev; use a valid cert in production |
 | `401 Unauthorized` from SL | Session expired or login failed | Ensure cookie container is shared in `HttpClientHandler`; call `LoginAsync` before each batch |
 | `400 Bad Request` from SL | Missing required field or wrong value | Check SL error message in `error.message.value`; review CardType string (`cCustomer` not `Customer`) |
-| Large file upload rejected | Blazor default max file size is 512KB | Set `maxAllowedSize` in `OpenReadStream()` |
+| UDF column not sent to SL | Column name doesn't start with `U_` | Prefix the column name with `U_` exactly (case-insensitive) |
+| Address rows not linked | `CardCode` in address file doesn't match header file | Check for extra spaces or case differences; parser uses `OrdinalIgnoreCase` |
+| Large file upload rejected | Blazor default max file size is 512KB | `MaxFileSize` constant in `Import.razor` is set to 10MB; increase if needed |
 | CORS error in browser | API not allowing Blazor origin | Configure `WithOrigins` in `AddCors` in `Program.cs` |
