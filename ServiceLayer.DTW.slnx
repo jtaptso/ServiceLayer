@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ServiceLayer.DTW.Api/ServiceLayer.DTW.Api.csproj" />
+    <Project Path="src/ServiceLayer.DTW.Application/ServiceLayer.DTW.Application.csproj" />
+    <Project Path="src/ServiceLayer.DTW.Domain/ServiceLayer.DTW.Domain.csproj" />
+    <Project Path="src/ServiceLayer.DTW.Infrastructure/ServiceLayer.DTW.Infrastructure.csproj" />
+    <Project Path="src/ServiceLayer.DTW.Shared/ServiceLayer.DTW.Shared.csproj" />
+    <Project Path="src/ServiceLayer.DTW.Web/ServiceLayer.DTW.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ServiceLayer.DTW.Application.Tests/ServiceLayer.DTW.Application.Tests.csproj" />
+    <Project Path="tests/ServiceLayer.DTW.Domain.Tests/ServiceLayer.DTW.Domain.Tests.csproj" />
+    <Project Path="tests/ServiceLayer.DTW.Infrastructure.Tests/ServiceLayer.DTW.Infrastructure.Tests.csproj" />
+  </Folder>
+</Solution>

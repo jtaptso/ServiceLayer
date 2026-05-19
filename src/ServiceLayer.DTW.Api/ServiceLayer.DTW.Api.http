@@ -1,0 +1,6 @@
+@ServiceLayer.DTW.Api_HostAddress = http://localhost:5023
+
+GET {{ServiceLayer.DTW.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
