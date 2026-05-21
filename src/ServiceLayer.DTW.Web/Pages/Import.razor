@@ -1,0 +1,105 @@
+@page "/import"
+@using ServiceLayer.DTW.Domain.Enums
+@using ServiceLayer.DTW.Shared.Responses
+@using ServiceLayer.DTW.Web.Services
+@inject ImportApiClient ApiClient
+
+<h2>Import Business Partners</h2>
+
+<div>
+    <label><strong>Import file</strong> (CSV, TXT, or XLSX)</label><br />
+    <InputFile OnChange="e => _file = e.File" accept=".csv,.txt,.xlsx" />
+    <small style="display:block;margin-top:.25rem">
+        One row per Business Partner. Columns: CardCode, CardName, CardType, Phone1, EmailAddress,
+        BillTo_Street, BillTo_City, BillTo_Country, ShipTo_Street, ShipTo_City, ShipTo_Country,
+        Contact1_Name, Contact1_E_Mail, U_* (any UDF).
+    </small>
+</div>
+
+<div style="margin-top:1rem">
+    <label>Import Mode: </label>
+    <select @bind="_mode">
+        <option value="@ImportMode.Upsert">Upsert (Add or Update)</option>
+        <option value="@ImportMode.AddOnly">Add Only</option>
+        <option value="@ImportMode.UpdateOnly">Update Only</option>
+    </select>
+</div>
+
+<div>
+    <label>
+        <input type="checkbox" @bind="_stopOnError" />
+        Stop on first error
+    </label>
+</div>
+
+<button @onclick="RunImport" disabled="@(_file is null || _importing)" style="margin-top:1rem">
+    @(_importing ? "Importing..." : "Start Import")
+</button>
+
+@if (_result is not null)
+{
+    <hr />
+    <h3>Results</h3>
+    <p>
+        Total: @_result.TotalRows |
+        Success: @_result.SuccessCount |
+        Errors: @_result.ErrorCount |
+        Skipped: @_result.SkippedCount
+    </p>
+
+    <table>
+        <thead>
+            <tr><th>Row</th><th>CardCode</th><th>Status</th><th>Message</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var row in _result.RowResults)
+            {
+                <tr>
+                    <td>@row.RowNumber</td>
+                    <td>@row.CardCode</td>
+                    <td>@row.Status</td>
+                    <td>@row.Message</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@if (_error is not null)
+{
+    <p style="color:red">@_error</p>
+}
+
+@code {
+    private IBrowserFile? _file;
+    private ImportMode    _mode        = ImportMode.Upsert;
+    private bool          _stopOnError = false;
+    private bool          _importing   = false;
+    private ImportJobResponse? _result;
+    private string?       _error;
+
+    private const long MaxFileSize = 10 * 1024 * 1024; // 10 MB
+
+    private async Task RunImport()
+    {
+        if (_file is null) return;
+        _importing = true;
+        _result    = null;
+        _error     = null;
+
+        try
+        {
+            await using var stream = _file.OpenReadStream(MaxFileSize);
+            _result = await ApiClient.ImportBusinessPartnersAsync(
+                stream, _file.Name, _mode, _stopOnError);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _importing = false;
+        }
+    }
+}
