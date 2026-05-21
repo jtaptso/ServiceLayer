@@ -58,4 +58,20 @@ public class ImportController : ControllerBase
 
         return Ok(response);
     }
+
+    [HttpPost("business-partners/export-log")]
+    public IActionResult ExportLog([FromBody] ImportJobResponse result)
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("RowNumber,CardCode,Status,Message");
+
+        foreach (var row in result.RowResults)
+        {
+            var msg = row.Message?.Replace("\"", "\"\"") ?? string.Empty;
+            sb.AppendLine($"{row.RowNumber},{row.CardCode},{row.Status},\"{msg}\"");
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetBytes(sb.ToString());
+        return File(bytes, "text/csv", "import-results.csv");
+    }
 }
