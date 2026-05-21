@@ -1,4 +1,5 @@
 ﻿using ServiceLayer.DTW.Application.DTOs;
+using ServiceLayer.DTW.Application.Interfaces;
 using ServiceLayer.DTW.Domain.Enums;
 using ServiceLayer.DTW.Domain.Models;
 using ServiceLayer.DTW.Infrastructure.DTOs;
@@ -9,15 +10,15 @@ using System.Text.Json;
 
 namespace ServiceLayer.DTW.Infrastructure.Mapping
 {
-    public static class BusinessPartnerMapper
-    {
+public class BusinessPartnerMapper : IBusinessPartnerMapper
+{
         /// <summary>
         /// Maps a single flat ParsedRowDto to a BusinessPartner domain entity.
         /// Flat address columns (BillTo_*, ShipTo_*) become BPAddress children.
         /// Flat contact columns (Contact{n}_*) become ContactPerson children.
         /// U_* columns are captured as UdfFields and passed to Service Layer.
         /// </summary>
-        public static BusinessPartner ToDomain(ParsedRowDto row)
+        public BusinessPartner ToDomain(ParsedRowDto row)
         {
             var f = row.Fields;
 

@@ -5,7 +5,7 @@ using System.Text;
 
 namespace ServiceLayer.DTW.Infrastructure.Parsing
 {
-    public class FileParserResolver
+    public class FileParserResolver : IFileParserResolver
     {
         private readonly IEnumerable<IFileParser> _parsers;
 
