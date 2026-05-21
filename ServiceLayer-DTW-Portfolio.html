@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="ServiceLayer.DTW — a modern replacement for SAP Business One's Data Transfer Workbench built on Clean Architecture with .NET 10, ASP.NET Core, and Blazor WebAssembly.">
+<title>ServiceLayer.DTW — SAP B1 Data Transfer Workbench Replacement</title>
+<style>
+  /* ===== Reset & Base ===== */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0b0f18;
+    --surface: #121826;
+    --surface2: #1a2030;
+    --border: #252d3f;
+    --text: #dce0e8;
+    --text-dim: #8892a7;
+    --accent: #5b9bd5;
+    --accent2: #49c5b1;
+    --accent3: #d48b5b;
+    --red: #e0556a;
+    --yellow: #e5c15a;
+    --green: #4caf7c;
+    --font: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    --mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', monospace;
+  }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ===== Hero ===== */
+  .hero {
+    min-height: 85vh;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center;
+    position: relative;
+    padding: 4rem 2rem;
+    background: radial-gradient(ellipse 70% 60% at 50% 30%, rgba(91,155,213,0.08), transparent 70%),
+                radial-gradient(ellipse 50% 40% at 80% 80%, rgba(73,197,177,0.06), transparent 70%);
+  }
+  .hero-badge {
+    display: inline-block; padding: .35rem 1.2rem; border-radius: 2rem;
+    font-size: .82rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    background: rgba(91,155,213,0.12); color: var(--accent); border: 1px solid rgba(91,155,213,0.25);
+    margin-bottom: 1.5rem;
+  }
+  .hero h1 {
+    font-size: clamp(2.4rem, 6vw, 4.2rem); font-weight: 700;
+    background: linear-gradient(135deg, #5b9bd5 0%, #49c5b1 50%, #7ab4e8 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1.15; margin-bottom: 1rem;
+  }
+  .hero h2 {
+    font-size: 1.15rem; font-weight: 400; color: var(--text-dim); max-width: 700px;
+  }
+  .hero-tags { display: flex; gap: .6rem; flex-wrap: wrap; justify-content: center; margin-top: 1.8rem; }
+  .hero-tag {
+    padding: .3rem .85rem; border-radius: .4rem; font-size: .78rem;
+    background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim);
+  }
+
+  /* ===== Section styles ===== */
+  section {
+    max-width: 1100px; margin: 0 auto; padding: 4rem 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .section-title {
+    font-size: 1.7rem; font-weight: 700; margin-bottom: .3rem;
+    display: flex; align-items: center; gap: .6rem;
+  }
+  .section-title .num {
+    font-family: var(--mono); font-size: .85rem; font-weight: 600;
+    color: var(--accent); background: rgba(91,155,213,0.1); padding: .15rem .6rem;
+    border-radius: .3rem;
+  }
+  .section-sub {
+    color: var(--text-dim); font-size: .95rem; margin-bottom: 2rem;
+  }
+
+  /* ===== Architecture Diagram ===== */
+  .arch-container {
+    display: flex; flex-direction: column; gap: .6rem; margin: 2rem 0;
+  }
+  .arch-layer {
+    border-radius: .6rem; padding: 1rem 1.4rem; position: relative;
+    border: 1px solid var(--border);
+  }
+  .arch-layer .label {
+    font-weight: 700; font-size: .85rem; text-transform: uppercase; letter-spacing: .04em;
+    margin-bottom: .3rem;
+  }
+  .arch-layer .desc { font-size: .85rem; color: var(--text-dim); }
+  .arch-blazor { background: rgba(212,139,91,0.08); border-color: rgba(212,139,91,0.3); }
+  .arch-blazor .label { color: var(--accent3); }
+  .arch-api { background: rgba(91,155,213,0.08); border-color: rgba(91,155,213,0.3); }
+  .arch-api .label { color: var(--accent); }
+  .arch-app { background: rgba(73,197,177,0.08); border-color: rgba(73,197,177,0.3); }
+  .arch-app .label { color: var(--accent2); }
+  .arch-sap { background: rgba(224,85,106,0.08); border-color: rgba(224,85,106,0.3); }
+  .arch-sap .label { color: var(--red); }
+
+  .arch-arrow {
+    display: flex; justify-content: center; color: var(--text-dim);
+    font-family: var(--mono); font-size: 1.2rem; padding: .1rem 0;
+  }
+
+  /* ===== Grid ===== */
+  .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.2rem; }
+  .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.2rem; }
+  .grid4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.2rem; }
+
+  /* ===== Cards ===== */
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .7rem;
+    padding: 1.3rem 1.5rem;
+    transition: border-color .2s, box-shadow .2s;
+    will-change: transform;
+  }
+  .card:hover {
+    border-color: rgba(91,155,213,0.4);
+    box-shadow: 0 2px 12px rgba(91,155,213,0.08);
+    transform: translateY(-1px);
+  }
+  .card h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: .5rem; }
+  .card p { font-size: .88rem; color: var(--text-dim); }
+  .card .icon { font-size: 1.5rem; margin-bottom: .5rem; }
+
+  /* ===== Feature cards with accent left border ===== */
+  .feat {
+    background: var(--surface); border-left: 3px solid var(--accent);
+    border-radius: 0 .6rem .6rem 0; padding: 1rem 1.3rem; margin-bottom: .7rem;
+  }
+  .feat:nth-child(3n+2) { border-left-color: var(--accent2); }
+  .feat:nth-child(3n)   { border-left-color: var(--accent3); }
+  .feat h4 { font-size: .95rem; font-weight: 600; margin-bottom: .2rem; }
+  .feat p { font-size: .82rem; color: var(--text-dim); }
+
+  /* ===== Tech stack table-like cards ===== */
+  .tech-item {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .6rem;
+    padding: 1rem 1.2rem; text-align: center;
+  }
+  .tech-item .name { font-weight: 700; font-size: 1rem; }
+  .tech-item .role { font-size: .78rem; color: var(--text-dim); margin-top: .2rem; }
+
+  /* ===== Code blocks ===== */
+  pre.code-block {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: .6rem;
+    padding: 1.2rem 1.5rem; overflow-x: auto; margin: 1rem 0;
+    font-family: var(--mono); font-size: .82rem; line-height: 1.55;
+    position: relative;
+    white-space: pre;
+  }
+  pre.code-block code {
+    font-family: var(--mono);
+    color: var(--text);
+  }
+  pre.code-block .lang-tag {
+    position: absolute; top: 0; right: 1rem; font-size: .68rem; text-transform: uppercase;
+    color: var(--accent); background: var(--surface); padding: .1rem .6rem;
+    border-radius: 0 0 .3rem .3rem; letter-spacing: .05em;
+    font-family: var(--font);
+  }
+  .kw { color: var(--accent); }
+  .str { color: var(--accent2); }
+  .cmt { color: var(--text-dim); font-style: italic; }
+  .fn  { color: var(--accent3); }
+
+  /* ===== Pipeline / workflow ===== */
+  .pipeline {
+    display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+    margin: 1.5rem 0; justify-content: center;
+  }
+  .pipeline-step {
+    background: var(--surface); border: 1px solid var(--border); border-radius: .5rem;
+    padding: .8rem 1rem; text-align: center; font-size: .82rem; font-weight: 600;
+    min-width: 110px;
+  }
+  .pipeline-arrow { color: var(--text-dim); font-size: 1rem; }
+
+  /* ===== Status badges ===== */
+  .badge { display: inline-block; padding: .15rem .6rem; border-radius: .3rem; font-size: .75rem; font-weight: 600; }
+  .badge-ok { background: rgba(76,175,124,0.15); color: var(--green); }
+  .badge-err { background: rgba(224,85,106,0.15); color: var(--red); }
+  .badge-skip { background: rgba(229,193,90,0.15); color: var(--yellow); }
+
+  /* ===== Stats bar ===== */
+  .stats-bar {
+    display: flex; gap: 2rem; flex-wrap: wrap; justify-content: center;
+    margin: 2rem 0;
+  }
+  .stat { text-align: center; }
+  .stat .value { font-size: 2rem; font-weight: 700; color: var(--accent); }
+  .stat .label { font-size: .78rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+
+  /* ===== API table ===== */
+  .api-table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+  .api-table th { text-align: left; border-bottom: 2px solid var(--border); padding: .5rem .8rem; }
+  .api-table td { padding: .5rem .8rem; border-bottom: 1px solid var(--border); }
+  .api-table th:first-child { min-width: 110px; }
+
+  /* ===== Format table ===== */
+  .format-table { width:100%; border-collapse:collapse; font-size:.85rem; margin-top:1rem; }
+  .format-table th { text-align: left; border-bottom: 2px solid var(--border); padding: .5rem .8rem; }
+  .format-table td { padding: .5rem .8rem; border-bottom: 1px solid var(--border); }
+  .format-mono { font-family: var(--mono); font-size: .78rem; }
+
+  /* ===== Footer ===== */
+  .footer {
+    text-align: center; padding: 3rem 2rem; color: var(--text-dim);
+    font-size: .82rem; border-top: 1px solid var(--border);
+  }
+
+  /* ===== Responsive ===== */
+  @media (max-width: 720px) {
+    .pipeline { flex-direction: column; }
+    .pipeline-arrow { transform: rotate(90deg); }
+    .stats-bar { gap: 1rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ==================== HERO ==================== -->
+<header class="hero">
+  <span class="hero-badge">Enterprise Integration</span>
+  <h1>ServiceLayer<span style="color:#dce0e8">.</span>DTW</h1>
+  <h2>
+    A modern replacement for SAP Business One's Data Transfer Workbench —
+    built on Clean Architecture with .NET 10, ASP.NET Core, and Blazor WebAssembly.
+    Bulk-import master data into SAP B1 via the Service Layer REST API.
+  </h2>
+  <div class="hero-tags">
+    <span class="hero-tag">C#  /  .NET 10</span>
+    <span class="hero-tag">ASP.NET Core Web API</span>
+    <span class="hero-tag">Blazor WebAssembly</span>
+    <span class="hero-tag">Clean Architecture</span>
+    <span class="hero-tag">SAP Business One</span>
+    <span class="hero-tag">MediatR</span>
+    <span class="hero-tag">FluentValidation</span>
+  </div>
+</header>
+
+<!-- ==================== PROJECT OVERVIEW ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">01</span> Project Overview</h2>
+  <p class="section-sub">
+    Why this project exists and what problem it solves.
+  </p>
+
+  <div class="grid2">
+    <div class="card">
+      <div class="icon">🎯</div>
+      <h3>The Problem</h3>
+      <p>
+        SAP Business One's legacy Data Transfer Workbench (DTW) relies on the DI API/COM stack,
+        requiring a Windows client installation and complex setup. Modern integrations need a
+        lightweight, HTTP-based alternative that works from any platform.
+      </p>
+    </div>
+    <div class="card">
+      <div class="icon">✅</div>
+      <h3>The Solution</h3>
+      <p>
+        A fully REST-based import tool that speaks directly to the SAP B1 Service Layer.
+        Upload CSV, TXT, or Excel files through a Blazor WebAssembly UI or REST API —
+        no SAP client installation required. Validates, maps, and imports Business Partners
+        with addresses, contacts, and user-defined fields.
+      </p>
+    </div>
+  </div>
+
+  <div class="stats-bar">
+    <div class="stat"><div class="value">9</div><div class="label">Projects</div></div>
+    <div class="stat"><div class="value">3</div><div class="label">Test Suites</div></div>
+    <div class="stat"><div class="value">10</div><div class="label">NuGet Packages</div></div>
+    <div class="stat"><div class="value">2</div><div class="label">File Parsers</div></div>
+    <div class="stat"><div class="value">3</div><div class="label">Import Modes</div></div>
+  </div>
+</section>
+
+<!-- ==================== ARCHITECTURE ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">02</span> Clean Architecture</h2>
+  <p class="section-sub">
+    The solution follows Clean Architecture principles with strict dependency rules — inner layers never reference outer layers.
+  </p>
+
+  <div class="arch-container">
+    <!-- Blazor WASM -->
+    <div class="arch-layer arch-blazor">
+      <div class="label">Web UI &nbsp;—&nbsp; Blazor WebAssembly</div>
+      <div class="desc">Single-file upload page with import mode selection, error handling, and per-row result table. Communicates with the API exclusively through typed HttpClient services and shared DTOs.</div>
+    </div>
+    <div class="arch-arrow" aria-hidden="true">▼ &nbsp; HTTP multipart/form-data &nbsp; ▼</div>
+
+    <!-- API -->
+    <div class="arch-layer arch-api">
+      <div class="label">API Layer &nbsp;—&nbsp; ASP.NET Core Web API</div>
+      <div class="desc">
+        <strong>Controllers:</strong> ImportController — POST /api/import/business-partners (upload file), POST /api/import/business-partners/export-log (download CSV log)<br>
+        <strong>DI Composition Root:</strong> Registers MediatR, FluentValidation, file parsers, Service Layer HTTP client with cookie-based session management<br>
+        <strong>API Docs:</strong> Scalar UI at /scalar/v1
+      </div>
+    </div>
+    <div class="arch-arrow" aria-hidden="true">▼ &nbsp; MediatR Command / Handler &nbsp; ▼</div>
+
+    <!-- Application -->
+    <div class="arch-layer arch-app">
+      <div class="label">Application Layer &nbsp;—&nbsp; Use Cases, Ports, Validation</div>
+      <div class="desc">
+        Orchestrates the import pipeline: parses file → maps rows → validates → imports via Service Layer.
+        Defines ports (interfaces) that the Infrastructure layer implements.
+      </div>
+    </div>
+    <div class="arch-arrow" aria-hidden="true">▼ &nbsp; Domain Models + Ports &nbsp; ▼</div>
+
+    <!-- Domain -->
+    <div class="arch-layer" style="background:rgba(255,255,255,0.02)">
+      <div class="label" style="color:var(--text)">Domain Layer &nbsp;—&nbsp; Entities, Enums, Value Objects</div>
+      <div class="desc">BusinessPartner, BPAddress, ContactPerson entities. CardType (Customer/Supplier/Lead), ImportMode (AddOnly/UpdateOnly/Upsert), ImportRowStatus (Success/Error/Skipped) enums. No external dependencies.</div>
+    </div>
+    <div class="arch-arrow" aria-hidden="true">▼ &nbsp; HTTPS / REST &nbsp; ▼</div>
+
+    <!-- SAP -->
+    <div class="arch-layer arch-sap">
+      <div class="label">External &nbsp;—&nbsp; SAP Business One Service Layer</div>
+      <div class="desc">
+        POST /b1s/v1/BusinessPartners (create) &nbsp;|&nbsp;
+        PATCH /b1s/v1/BusinessPartners('{CardCode}') (update) &nbsp;|&nbsp;
+        GET to check existence. Cookie-based session authentication (B1SESSION).
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== TECHNOLOGY STACK ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">03</span> Technology Stack</h2>
+  <p class="section-sub">Key libraries, frameworks, and tools used across the solution.</p>
+
+  <div class="grid4">
+    <div class="tech-item"><div class="name">.NET 10</div><div class="role">Runtime &amp; SDK</div></div>
+    <div class="tech-item"><div class="name">ASP.NET Core</div><div class="role">Web API Host</div></div>
+    <div class="tech-item"><div class="name">Blazor WASM</div><div class="role">Frontend UI</div></div>
+    <div class="tech-item"><div class="name">MediatR</div><div class="role">CQRS / Mediator</div></div>
+    <div class="tech-item"><div class="name">FluentValidation</div><div class="role">Domain Validation</div></div>
+    <div class="tech-item"><div class="name">CsvHelper</div><div class="role">CSV &amp; TXT Parsing</div></div>
+    <div class="tech-item"><div class="name">EPPlus</div><div class="role">Excel (.xlsx) Parsing</div></div>
+    <div class="tech-item"><div class="name">Scalar</div><div class="role">OpenAPI UI</div></div>
+    <div class="tech-item"><div class="name">xUnit</div><div class="role">Unit Testing</div></div>
+    <div class="tech-item"><div class="name">Moq</div><div class="role">Mocking Framework</div></div>
+    <div class="tech-item"><div class="name">FluentAssertions</div><div class="role">Readable Assertions</div></div>
+    <div class="tech-item"><div class="name">System.Text.Json</div><div class="role">JSON Serialization</div></div>
+  </div>
+</section>
+
+<!-- ==================== KEY FEATURES ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">04</span> Key Features</h2>
+  <p class="section-sub">What makes this tool powerful and production-ready.</p>
+
+  <div class="feat">
+    <h4>📂 Multi-Format File Support</h4>
+    <p>Accepts CSV (comma/semicolon), TXT (tab/delimiter), and Excel (.xlsx) files. A pluggable parser architecture (IFileParser + FileParserResolver) makes adding new formats trivial.</p>
+  </div>
+  <div class="feat">
+    <h4>🧠 Smart Flat‑File Mapping</h4>
+    <p>One flat row becomes a fully structured BusinessPartner domain object. Prefixed columns (BillTo_*, ShipTo_*, Contact{n}_*) automatically map to nested addresses and contact persons. U_* UDF columns pass through to SAP without code changes.</p>
+  </div>
+  <div class="feat">
+    <h4>🔍 Per‑Row Validation</h4>
+    <p>FluentValidation rules check CardCode (required, max 15), CardName (required, max 100), EmailAddress format, and AddressType values before any SAP call is made.</p>
+  </div>
+  <div class="feat">
+    <h4>🔄 Three Import Modes</h4>
+    <p><strong>AddOnly</strong> — creates new records, skips existing CardCodes. <strong>UpdateOnly</strong> — patches existing records, skips new CardCodes. <strong>Upsert</strong> — checks existence first (GET), then POSTs or PATCHes accordingly.</p>
+  </div>
+  <div class="feat">
+    <h4>🛡️ Error Handling Strategies</h4>
+    <p>Stop on first error (abort the entire job) or continue on error (process all rows and collect failures). Every row gets a status (Success / Error / Skipped) with a descriptive message.</p>
+  </div>
+  <div class="feat">
+    <h4>📥 Downloadable Result Log</h4>
+    <p>After import, the per-row result table can be exported as a CSV file via the /export-log endpoint — useful for auditing and corrections.</p>
+  </div>
+  <div class="feat">
+    <h4>🔐 SAP Service Layer Auth</h4>
+    <p>Cookie-based session management via HttpClient with shared CookieContainer. Handles login, logout, self-signed certificates (dev), and error message extraction from SAP's JSON error format.</p>
+  </div>
+  <div class="feat">
+    <h4>🧩 UDF Pass‑Through</h4>
+    <p>Any column starting with U_ in the import file is automatically captured in the domain model's UdfFields dictionary and serialized into the SAP payload via [JsonExtensionData] — no code changes needed per UDF.</p>
+  </div>
+  <div class="feat">
+    <h4>🧪 Comprehensive Test Coverage</h4>
+    <p>Unit tests for the CSV parser, the FluentValidation rules, the BusinessPartnerMapper (UDF extraction, address mapping, contact extraction), and the MediatR handler (mocked parser, SL client, and validator).</p>
+  </div>
+</section>
+
+<!-- ==================== IMPORT PIPELINE ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">05</span> Import Pipeline</h2>
+  <p class="section-sub">Step-by-step flow from file upload to SAP Business One.</p>
+
+  <div class="pipeline">
+    <div class="pipeline-step">📤<br>Upload File</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">📄<br>Parse Rows</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">🗺️<br>Map to Domain</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">✅<br>Validate</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">🔑<br>SL Login</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">🔍<br>Check Exists</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">📬<br>POST / PATCH</div>
+    <span class="pipeline-arrow" aria-hidden="true">→</span>
+    <div class="pipeline-step">📊<br>Result Log</div>
+  </div>
+
+  <h3 style="font-size:1rem; margin:2rem 0 .8rem; font-weight:600;">Handler implementation (simplified)</h3>
+  <pre class="code-block"><span class="lang-tag">C#</span><code><span class="cmt">// 1. Resolve the right parser (CSV, Excel, TXT) by file extension</span>
+<span class="kw">var</span> rows = <span class="kw">await</span> _parserResolver.Resolve(command.FileName)
+    .ParseAsync(command.FileStream, command.FileName, ct);
+
+<span class="cmt">// 2. Map each flat row → BusinessPartner domain entity</span>
+<span class="kw">var</span> businessPartners = rows.Select(_mapper.ToDomain).ToList();
+
+<span class="cmt">// 3. Login to SAP Service Layer (cookie session)</span>
+<span class="kw">await</span> _slClient.LoginAsync(ct);
+
+<span class="kw">foreach</span> (<span class="kw">var</span> bp <span class="kw">in</span> businessPartners)
+{
+    <span class="cmt">// 4. Validate before calling SAP</span>
+    <span class="kw">var</span> validation = <span class="kw">await</span> _validator.ValidateAsync(bp, ct);
+    <span class="kw">if</span> (!validation.IsValid) { <span class="cmt">/* record error */</span> <span class="kw">continue</span>; }
+
+    <span class="cmt">// 5. Upsert: check if CardCode exists → POST or PATCH</span>
+    <span class="kw">bool</span> exists = <span class="kw">await</span> _slClient.BusinessPartnerExistsAsync(bp.CardCode, ct);
+    <span class="kw">if</span> (exists)
+        <span class="kw">await</span> _slClient.UpdateBusinessPartnerAsync(bp, ct);    <span class="cmt">// PATCH</span>
+    <span class="kw">else</span>
+        <span class="kw">await</span> _slClient.CreateBusinessPartnerAsync(bp, ct);   <span class="cmt">// POST</span>
+}
+<span class="cmt">// 6. Logout &amp; return per-row results</span>
+<span class="kw">await</span> _slClient.LogoutAsync(ct);</code></pre>
+</section>
+
+<!-- ==================== DOMAIN MODEL ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">06</span> Domain Model</h2>
+  <p class="section-sub">
+    Core entities and their relationships. A Business Partner can have multiple addresses (Bill‑To, Ship‑To),
+    multiple contact persons, and dynamically captured user-defined fields.
+  </p>
+
+  <div class="grid3">
+    <div class="card">
+      <h3>BusinessPartner</h3>
+      <p>
+        <code>CardCode</code> (PK, max 15) &middot;
+        <code>CardName</code> (max 100) &middot;
+        <code>CardType</code> (Customer/Supplier/Lead) &middot;
+        <code>GroupCode</code> &middot;
+        <code>Currency</code> &middot;
+        <code>PayTermsGrpCode</code> &middot;
+        <code>Phone1</code> &middot;
+        <code>EmailAddress</code> &middot;
+        <code>Website</code> &middot;
+        <code>FederalTaxID</code> &middot;
+        <code>UdfFields</code> (Dictionary&lt;string,string&gt;) &middot;
+        <code>Addresses</code> (List&lt;BPAddress&gt;) &middot;
+        <code>Contacts</code> (List&lt;ContactPerson&gt;)
+      </p>
+    </div>
+    <div class="card">
+      <h3>BPAddress</h3>
+      <p>
+        <code>AddressName</code> &middot;
+        <code>AddressType</code> (bo_BillTo / bo_ShipTo) &middot;
+        <code>Street</code> &middot;
+        <code>City</code> &middot;
+        <code>ZipCode</code> &middot;
+        <code>Country</code> (ISO) &middot;
+        <code>State</code> &middot;
+        <code>UdfFields</code>
+      </p>
+    </div>
+    <div class="card">
+      <h3>ContactPerson</h3>
+      <p>
+        <code>Name</code> &middot;
+        <code>FirstName</code> &middot;
+        <code>LastName</code> &middot;
+        <code>Phone1</code> &middot;
+        <code>MobilePhone</code> &middot;
+        <code>Email</code> &middot;
+        <code>Position</code> &middot;
+        <code>UdfFields</code>
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== FLAT FILE FORMAT ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">07</span> Flat File Column Format</h2>
+  <p class="section-sub">
+    One row = one Business Partner. Addresses and contacts are embedded using column prefixes.
+    U_* columns pass through to SAP automatically.
+  </p>
+
+  <pre class="code-block"><span class="lang-tag">CSV</span><code>CardCode,CardName,CardType,Phone1,EmailAddress,<span class="kw">U_TaxRegion</span>,<span class="kw">BillTo_Street</span>,<span class="kw">BillTo_City</span>,<span class="kw">BillTo_Country</span>,<span class="kw">ShipTo_Street</span>,<span class="kw">ShipTo_City</span>,<span class="kw">ShipTo_Country</span>,<span class="kw">Contact1_Name</span>,<span class="kw">Contact1_E_Mail</span>
+C001,Acme Corporation,C,+1-555-0100,info@acme.com,Northeast,123 Main St,New York,US,456 Warehouse Ave,Brooklyn,US,John Smith,john@acme.com
+S001,Big Supplier Ltd,S,+1-555-0200,orders@bigsupplier.com,West,789 Supply Rd,Los Angeles,US,,,,Jane Doe,jane@bigsupplier.com</code></pre>
+
+  <table class="format-table">
+    <thead>
+      <tr>
+        <th>Prefix</th>
+        <th>Purpose</th>
+        <th>Examples</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="font-family:var(--mono); color:var(--accent);">(none)</td>
+        <td>BP core fields</td>
+        <td class="format-mono">CardCode, CardName, CardType, GroupCode, Currency, Phone1, EmailAddress, Website, FederalTaxID</td>
+      </tr>
+      <tr>
+        <td style="font-family:var(--mono); color:var(--accent2);">BillTo_</td>
+        <td>Bill-to address</td>
+        <td class="format-mono">BillTo_AddressName, BillTo_Street, BillTo_City, BillTo_ZipCode, BillTo_Country, BillTo_State</td>
+      </tr>
+      <tr>
+        <td style="font-family:var(--mono); color:var(--accent2);">ShipTo_</td>
+        <td>Ship-to address</td>
+        <td class="format-mono">ShipTo_AddressName, ShipTo_Street, ShipTo_City, ShipTo_ZipCode, ShipTo_Country, ShipTo_State</td>
+      </tr>
+      <tr>
+        <td style="font-family:var(--mono); color:var(--accent3);">Contact{n}_</td>
+        <td>Contact persons (1–9)</td>
+        <td class="format-mono">Contact1_Name, Contact1_FirstName, Contact1_LastName, Contact1_Phone1, Contact1_MobilePhone, Contact1_E_Mail, Contact1_Position</td>
+      </tr>
+      <tr>
+        <td style="font-family:var(--mono); color:var(--yellow);">U_</td>
+        <td>User-Defined Fields (UDFs)</td>
+        <td class="format-mono">U_TaxRegion, U_CustomerTier, U_IndustryCode, … any arbitrary U_* column</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ==================== PROJECT STRUCTURE ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">08</span> Solution Structure</h2>
+  <p class="section-sub">
+    9 projects — 6 source + 3 test — organized by Clean Architecture layers.
+  </p>
+
+  <pre class="code-block"><span class="lang-tag">File Tree</span><code>ServiceLayer.DTW.sln
+├── src/
+│   ├── <span class="kw">ServiceLayer.DTW.Domain</span>          <span class="cmt"># Entities, enums, interfaces (no deps)</span>
+│   ├── <span class="kw">ServiceLayer.DTW.Application</span>     <span class="cmt"># Use cases (MediatR), validators, ports</span>
+│   ├── <span class="kw">ServiceLayer.DTW.Infrastructure</span>  <span class="cmt"># SL client, CSV/Excel parsers, mapper</span>
+│   ├── <span class="kw">ServiceLayer.DTW.Shared</span>          <span class="cmt"># DTOs — shared by API and Web</span>
+│   ├── <span class="kw">ServiceLayer.DTW.Api</span>              <span class="cmt"># ASP.NET Core host + controllers</span>
+│   └── <span class="kw">ServiceLayer.DTW.Web</span>             <span class="cmt"># Blazor WebAssembly UI</span>
+└── tests/
+    ├── <span class="kw">ServiceLayer.DTW.Domain.Tests</span>
+    ├── <span class="kw">ServiceLayer.DTW.Application.Tests</span>   <span class="cmt"># Handler, validator, mapper tests</span>
+    └── <span class="kw">ServiceLayer.DTW.Infrastructure.Tests</span> <span class="cmt"># CsvParser tests</span></code></pre>
+
+  <h3 style="font-size:1rem; margin:2rem 0 .8rem; font-weight:600;">Dependency Flow</h3>
+  <div style="font-family:var(--mono); font-size:.85rem; color:var(--text-dim); line-height:2;">
+    <span style="color:var(--accent3);">Web</span> → Shared &nbsp;&nbsp;&nbsp;
+    <span style="color:var(--accent);">Api</span> → Application + Infrastructure + Shared &nbsp;&nbsp;&nbsp;
+    <span style="color:var(--accent2);">Infrastructure</span> → Application &nbsp;&nbsp;&nbsp;
+    <span style="color:var(--text);">Application</span> → Domain &nbsp;&nbsp;&nbsp;
+    <span style="color:var(--text-dim);">Domain</span> → (none)
+  </div>
+</section>
+
+<!-- ==================== API ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">09</span> REST API</h2>
+  <p class="section-sub">Endpoints, request/response formats, and dependency injection setup.</p>
+
+  <table class="api-table">
+    <thead>
+      <tr>
+        <th>Method</th>
+        <th>Endpoint</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge badge-ok">POST</span></td>
+        <td style="font-family:var(--mono);">/api/import/business-partners</td>
+        <td>Upload a flat CSV/TXT/XLSX file. Parameters: <code>file</code>, <code>mode</code> (AddOnly|UpdateOnly|Upsert), <code>stopOnError</code> (bool). Returns <code>ImportJobResponse</code> with per-row results.</td>
+      </tr>
+      <tr>
+        <td><span class="badge badge-ok">POST</span></td>
+        <td style="font-family:var(--mono);">/api/import/business-partners/export-log</td>
+        <td>Download the result log as a CSV file. Accepts the <code>ImportJobResponse</code> JSON body.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3 style="font-size:1rem; margin:2rem 0 .8rem; font-weight:600;">DI Composition Root (Program.cs)</h3>
+  <pre class="code-block"><span class="lang-tag">C#</span><code><span class="cmt">// Configuration</span>
+builder.Services.<span class="fn">Configure</span>&lt;<span class="kw">ServiceLayerConfig</span>&gt;(builder.Configuration.GetSection(<span class="str">"ServiceLayer"</span>));
+
+<span class="cmt">// MediatR — discovers all handlers in the Application assembly</span>
+builder.Services.<span class="fn">AddMediatR</span>(cfg =&gt; cfg.RegisterServicesFromAssembly(
+    <span class="kw">typeof</span>(ImportBusinessPartnersHandler).Assembly));
+
+<span class="cmt">// Validation</span>
+builder.Services.<span class="fn">AddScoped</span>&lt;<span class="kw">IValidator</span>&lt;BusinessPartner&gt;, BusinessPartnerValidator&gt;();
+
+<span class="cmt">// Pluggable file parsers</span>
+builder.Services.<span class="fn">AddScoped</span>&lt;<span class="kw">IFileParser</span>, CsvParser&gt;();
+builder.Services.<span class="fn">AddScoped</span>&lt;<span class="kw">IFileParser</span>, ExcelParser&gt;();
+builder.Services.<span class="fn">AddScoped</span>&lt;<span class="kw">FileParserResolver</span>&gt;();
+
+<span class="cmt">// SAP Service Layer HTTP client with cookie session</span>
+builder.Services.<span class="fn">AddHttpClient</span>&lt;<span class="kw">IServiceLayerClient</span>, ServiceLayerClient&gt;(...)
+    .<span class="fn">ConfigurePrimaryHttpMessageHandler</span>(() =&gt; <span class="kw">new</span> HttpClientHandler {
+        ServerCertificateCustomValidationCallback =
+            DangerousAcceptAnyServerCertificateValidator,
+        UseCookies = <span class="kw">true</span>,
+        CookieContainer = <span class="kw">new</span> CookieContainer()
+    });
+
+<span class="cmt">// CORS for Blazor WASM + OpenAPI (Scalar)</span>
+builder.Services.<span class="fn">AddCors</span>(...);
+builder.Services.<span class="fn">AddOpenApi</span>();
+app.<span class="fn">MapOpenApi</span>(); app.<span class="fn">MapScalarApiReference</span>();</code></pre>
+</section>
+
+<!-- ==================== TESTS ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">10</span> Testing</h2>
+  <p class="section-sub">Comprehensive unit test coverage across all layers.</p>
+
+  <div class="grid3">
+    <div class="card">
+      <h3>🧪 Validator Tests</h3>
+      <p>
+        Tests that BusinessPartnerValidator rejects empty CardCode, invalid email addresses,
+        and accepts valid business partners. Uses FluentAssertions for readable assertions.
+      </p>
+    </div>
+    <div class="card">
+      <h3>🧪 Mapper Tests</h3>
+      <p>
+        Validates that U_* columns are extracted into UdfFields, BillTo_/ShipTo_ columns
+        become BPAddress objects with correct AddressType, and Contact{n}_* columns become
+        ContactPerson objects. Tests the real BusinessPartnerMapper directly.
+      </p>
+    </div>
+    <div class="card">
+      <h3>🧪 Handler Tests</h3>
+      <p>
+        Mocks all dependencies (IFileParser, IServiceLayerClient, IValidator) to test the
+        ImportBusinessPartnersHandler in isolation. Verifies success count, error count,
+        and proper handling of Upsert mode.
+      </p>
+    </div>
+    <div class="card">
+      <h3>🧪 CsvParser Tests</h3>
+      <p>
+        Tests that the CSV parser correctly parses header + data rows, supports .csv and .txt
+        extensions, and rejects .xlsx files. Uses theory tests for parameterized inputs.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== CONCLUSION ==================== -->
+<section>
+  <h2 class="section-title"><span class="num">11</span> Key Takeaways</h2>
+
+  <div class="feat">
+    <h4>🏗️ Production-Ready Clean Architecture</h4>
+    <p>Strict layer separation with dependency inversion. Domain layer has zero external dependencies. Application defines ports; Infrastructure implements them. API composes everything via DI.</p>
+  </div>
+  <div class="feat">
+    <h4>🔌 Pluggable &amp; Extensible</h4>
+    <p>Add a new file format: implement IFileParser and register in DI. Add a new SAP object type: create a new MediatR command/handler. Add a new UDF: just add a U_ column to your import file — no code change needed.</p>
+  </div>
+  <div class="feat">
+    <h4>🌐 Full-Stack .NET</h4>
+    <p>From Blazor WebAssembly in the browser to ASP.NET Core on the server to SAP B1 Service Layer on the backend — the entire stack is C# / .NET 10.</p>
+  </div>
+  <div class="feat">
+    <h4>✅ Test-Driven Quality</h4>
+    <p>Every critical path — parsing, mapping, validation, handler orchestration — is covered by unit tests using xUnit + Moq + FluentAssertions.</p>
+  </div>
+</section>
+
+<!-- ==================== FOOTER ==================== -->
+<footer class="footer">
+  <p>ServiceLayer.DTW &nbsp;·&nbsp; .NET 10 &nbsp;·&nbsp; SAP Business One &nbsp;·&nbsp; Clean Architecture</p>
+  <p style="margin-top:.3rem;">Built with C#, ASP.NET Core Web API, Blazor WebAssembly, MediatR, FluentValidation, CsvHelper, EPPlus</p>
+</footer>
+
+</body>
+</html>
