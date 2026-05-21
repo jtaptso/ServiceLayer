@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\ServiceLayer.DTW.Domain\ServiceLayer.DTW.Domain.csproj" />
+    <ProjectReference Include="..\ServiceLayer.DTW.Infrastructure\ServiceLayer.DTW.Infrastructure.csproj" />
   </ItemGroup>
 
   <ItemGroup>
